@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1060388608416",
+    "project_id": "gaming-7f86e",
+    "storage_bucket": "gaming-7f86e.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1060388608416:android:eefb14ecced34b192f6cc5",
+        "android_client_info": {
+          "package_name": "com.example.fl2_polintan"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAwQv7KvnzcUUpB9IcgdVRg7GIA2-ZC8FQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
