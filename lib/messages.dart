@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'chat.dart';
+import 'profile.dart';
 
 class MessagesPage extends StatefulWidget {
   const MessagesPage({super.key});
@@ -15,11 +16,40 @@ class _MessagesPageState extends State<MessagesPage> {
   var searchController = TextEditingController();
   String searchQuery = "";
 
+  void openProfile(String userId) {
+    if (userId.isEmpty) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ProfilePage(userId: userId),
+      ),
+    );
+  }
+
+  String formatTime(DateTime? date) {
+    if (date == null) return "";
+    var hour = date.hour;
+    var minute = date.minute.toString().padLeft(2, '0');
+    var period = hour >= 12 ? "PM" : "AM";
+    var hour12 = hour % 12;
+    if (hour12 == 0) hour12 = 12;
+    return "$hour12:$minute $period";
+  }
+
+  String buildDisplayName(Map<String, dynamic> userData) {
+    var first = (userData['firstname'] ?? '').toString().trim();
+    var last = (userData['lastname'] ?? '').toString().trim();
+    var combined = [first, last].where((part) => part.isNotEmpty).join(' ');
+    if (combined.isNotEmpty) return combined;
+    var legacy = (userData['fullname'] ?? '').toString().trim();
+    if (legacy.isNotEmpty) return legacy;
+    return "User";
+  }
+
   Stream<QuerySnapshot> getConversations() {
     return FirebaseFirestore.instance
         .collection("tbl_messages")
         .where("participants", arrayContains: currentUser!.uid)
-        .orderBy("lastMessageAt", descending: true)
         .snapshots();
   }
 
@@ -42,7 +72,7 @@ class _MessagesPageState extends State<MessagesPage> {
 
     var otherUser = result.docs.first;
     var otherUid = otherUser.id;
-    var otherName = otherUser['fullname'] ?? "User";
+    var otherName = buildDisplayName(otherUser.data() as Map<String, dynamic>);
 
     if (otherUid == currentUser!.uid) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -65,7 +95,12 @@ class _MessagesPageState extends State<MessagesPage> {
         "participants": [currentUser!.uid, otherUid],
         "lastMessage": "",
         "lastMessageAt": FieldValue.serverTimestamp(),
+        "lastSenderId": "",
         "unreadCount": 0,
+        "unreadCounts": {
+          currentUser!.uid: 0,
+          otherUid: 0,
+        },
       });
     }
 
@@ -142,13 +177,34 @@ class _MessagesPageState extends State<MessagesPage> {
             child: StreamBuilder<QuerySnapshot>(
               stream: getConversations(),
               builder: (context, snapshot) {
-                if (!snapshot.hasData) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(
                     child: CircularProgressIndicator(color: Color(0xFF5865F2)),
                   );
                 }
+                if (snapshot.hasError) {
+                  return Center(
+                    child: Text(
+                      "Failed to load conversations",
+                      style: TextStyle(color: Colors.grey[500]),
+                    ),
+                  );
+                }
+                if (!snapshot.hasData || snapshot.data == null) {
+                  return const SizedBox.shrink();
+                }
 
                 var convos = snapshot.data!.docs;
+                convos.sort((a, b) {
+                  var aData = a.data() as Map<String, dynamic>;
+                  var bData = b.data() as Map<String, dynamic>;
+                  var aDate = aData['lastMessageAt']?.toDate();
+                  var bDate = bData['lastMessageAt']?.toDate();
+                  if (aDate == null && bDate == null) return 0;
+                  if (aDate == null) return 1;
+                  if (bDate == null) return -1;
+                  return bDate.compareTo(aDate);
+                });
 
                 if (convos.isEmpty) {
                   return Center(
@@ -182,12 +238,22 @@ class _MessagesPageState extends State<MessagesPage> {
                       orElse: () => "",
                     );
 
-                    var lastMessage = convo['lastMessage'] ?? "";
-                    var unreadCount = convo['unreadCount'] ?? 0;
-                    var lastDate = convo['lastMessageAt']?.toDate();
-                    var timeStr = lastDate != null
-                        ? "${lastDate.hour}:${lastDate.minute.toString().padLeft(2, '0')}"
-                        : "";
+                    if (otherUid.isEmpty) {
+                      return const SizedBox.shrink();
+                    }
+
+                    var data = convo.data() as Map<String, dynamic>;
+                    var lastMessage = data['lastMessage'] ?? "";
+                    var lastSenderId = data['lastSenderId'] ?? "";
+                    var unreadCounts = data['unreadCounts'] as Map<String, dynamic>?;
+                    var unreadCount = unreadCounts != null
+                        ? (unreadCounts[currentUser!.uid] ?? 0)
+                        : (data['unreadCount'] ?? 0);
+                    if (unreadCounts == null && lastSenderId == currentUser!.uid) {
+                      unreadCount = 0;
+                    }
+                    var lastDate = data['lastMessageAt']?.toDate();
+                    var timeStr = formatTime(lastDate);
 
                     return FutureBuilder<DocumentSnapshot>(
                       future: FirebaseFirestore.instance
@@ -195,16 +261,33 @@ class _MessagesPageState extends State<MessagesPage> {
                           .doc(otherUid)
                           .get(),
                       builder: (context, userSnapshot) {
-                        if (!userSnapshot.hasData) return const SizedBox();
+                        if (!userSnapshot.hasData) {
+                          return const SizedBox(
+                            height: 70,
+                            child: Center(
+                              child: CircularProgressIndicator(color: Color(0xFF5865F2), strokeWidth: 2),
+                            ),
+                          );
+                        }
 
-                        var otherName = userSnapshot.data!['fullname'] ?? "User";
+                        var userData = userSnapshot.data!.data() as Map<String, dynamic>;
+                        var otherName = buildDisplayName(userData);
+                        var profilePic = userData['profilepic'] ?? "";
 
                         return ListTile(
                           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                          leading: const CircleAvatar(
-                            radius: 26,
-                            backgroundColor: Color(0xFF5865F2),
-                            child: Icon(Icons.person, color: Colors.white),
+                          leading: GestureDetector(
+                            onTap: () => openProfile(otherUid),
+                            child: CircleAvatar(
+                              radius: 26,
+                              backgroundColor: const Color(0xFF5865F2),
+                              backgroundImage: profilePic.toString().isNotEmpty
+                                  ? NetworkImage(profilePic)
+                                  : null,
+                              child: profilePic.toString().isNotEmpty
+                                  ? null
+                                  : const Icon(Icons.person, color: Colors.white),
+                            ),
                           ),
                           title: Text(
                             otherName,

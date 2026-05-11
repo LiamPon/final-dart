@@ -1,6 +1,10 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:image_picker/image_picker.dart';
 
 class CreatePostPage extends StatefulWidget {
   const CreatePostPage({super.key});
@@ -16,6 +20,9 @@ class _CreatePostPageState extends State<CreatePostPage> {
   int charCount = 0;
   int maxChars = 500;
 
+  XFile? selectedImage;
+  Uint8List? selectedImageBytes;
+
   String selectedGame = "Valorant";
 
   List<String> games = [
@@ -26,6 +33,41 @@ class _CreatePostPageState extends State<CreatePostPage> {
     "Mobile Legends",
     "COC",
   ];
+
+  Future<void> pickPostImage() async {
+    var file = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 80,
+    );
+
+    if (file == null) return;
+
+    var bytes = await file.readAsBytes();
+    setState(() {
+      selectedImage = file;
+      selectedImageBytes = bytes;
+    });
+  }
+
+  void clearPostImage() {
+    setState(() {
+      selectedImage = null;
+      selectedImageBytes = null;
+    });
+  }
+
+  Future<String?> uploadPostImage() async {
+    if (selectedImage == null || selectedImageBytes == null) return null;
+
+    var fileName = selectedImage!.name;
+    var storageRef = FirebaseStorage.instance
+        .ref()
+        .child("post_images")
+        .child("${currentUser!.uid}_${DateTime.now().millisecondsSinceEpoch}_$fileName");
+
+    await storageRef.putData(selectedImageBytes!);
+    return storageRef.getDownloadURL();
+  }
 
   Future<void> submitPost() async {
     var content = postController.text.trim();
@@ -49,7 +91,9 @@ class _CreatePostPageState extends State<CreatePostPage> {
     });
 
     try {
-      await FirebaseFirestore.instance.collection("tbl_posts").add({
+      var imageUrl = await uploadPostImage();
+
+      var postData = {
         "content": content,
         "username": currentUser!.displayName ?? "User",
         "uid": currentUser!.uid,
@@ -59,9 +103,21 @@ class _CreatePostPageState extends State<CreatePostPage> {
         "likedBy": [],
         "bookmarkedBy": [],
         "createdAt": FieldValue.serverTimestamp(),
-      });
+      };
+
+      if (imageUrl != null && imageUrl.isNotEmpty) {
+        postData["imageUrl"] = imageUrl;
+      }
+
+      await FirebaseFirestore.instance.collection("tbl_posts").add(postData);
+
+      await FirebaseFirestore.instance
+          .collection("tbl_users")
+          .doc(currentUser!.uid)
+          .update({"postcount": FieldValue.increment(1)});
 
       if (!mounted) return;
+      clearPostImage();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Post submitted!")),
       );
@@ -184,6 +240,42 @@ class _CreatePostPageState extends State<CreatePostPage> {
                 ),
                 const SizedBox(height: 20),
 
+                Row(
+                  children: [
+                    IconButton(
+                      onPressed: pickPostImage,
+                      icon: Icon(Icons.photo, color: Colors.grey[400]),
+                    ),
+                    Text(
+                      selectedImageBytes == null ? "Add image" : "Image selected",
+                      style: TextStyle(color: Colors.grey[400]),
+                    ),
+                    const Spacer(),
+                    if (selectedImageBytes != null)
+                      TextButton(
+                        onPressed: clearPostImage,
+                        child: const Text(
+                          "Remove",
+                          style: TextStyle(color: Color(0xFF5865F2)),
+                        ),
+                      ),
+                  ],
+                ),
+                if (selectedImageBytes != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Image.memory(
+                        selectedImageBytes!,
+                        height: 200,
+                        width: double.infinity,
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: 20),
+
                 // Game tag selector
                 Text(
                   "Select Game Tag",
@@ -220,42 +312,6 @@ class _CreatePostPageState extends State<CreatePostPage> {
                       ),
                     );
                   }).toList(),
-                ),
-                const SizedBox(height: 20),
-
-                // Media options (not functional, just UI)
-                Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF2B2D31),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceAround,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(Icons.photo, color: Colors.green[400]),
-                          const SizedBox(width: 6),
-                          Text("Photo", style: TextStyle(color: Colors.grey[400])),
-                        ],
-                      ),
-                      Row(
-                        children: [
-                          Icon(Icons.videocam, color: Colors.red[400]),
-                          const SizedBox(width: 6),
-                          Text("Video", style: TextStyle(color: Colors.grey[400])),
-                        ],
-                      ),
-                      Row(
-                        children: [
-                          Icon(Icons.gif, color: Colors.blue[400]),
-                          const SizedBox(width: 6),
-                          Text("GIF", style: TextStyle(color: Colors.grey[400])),
-                        ],
-                      ),
-                    ],
-                  ),
                 ),
               ],
             ),

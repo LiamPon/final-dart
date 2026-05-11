@@ -1,6 +1,11 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:image_picker/image_picker.dart';
+import 'profile.dart';
 
 class ChatPage extends StatefulWidget {
   final String conversationId;
@@ -24,6 +29,51 @@ class _ChatPageState extends State<ChatPage> {
   var scrollController = ScrollController();
 
   bool isSending = false;
+  XFile? selectedMessageImage;
+  Uint8List? selectedMessageImageBytes;
+
+  void openProfile(String userId) {
+    if (userId.isEmpty) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ProfilePage(userId: userId),
+      ),
+    );
+  }
+
+  Widget buildUserAvatar(String userId, {double radius = 16}) {
+    if (userId.isEmpty) {
+      return CircleAvatar(
+        radius: radius,
+        backgroundColor: const Color(0xFF5865F2),
+        child: Icon(Icons.person, color: Colors.white, size: radius),
+      );
+    }
+
+    return StreamBuilder<DocumentSnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection("tbl_users")
+          .doc(userId)
+          .snapshots(),
+      builder: (context, snapshot) {
+        var imageUrl = "";
+        if (snapshot.hasData && snapshot.data != null) {
+          var data = snapshot.data!.data() as Map<String, dynamic>?;
+          imageUrl = data?['profilepic'] ?? "";
+        }
+
+        return CircleAvatar(
+          radius: radius,
+          backgroundColor: const Color(0xFF5865F2),
+          backgroundImage: imageUrl.toString().isNotEmpty ? NetworkImage(imageUrl) : null,
+          child: imageUrl.toString().isNotEmpty
+              ? null
+              : Icon(Icons.person, color: Colors.white, size: radius),
+        );
+      },
+    );
+  }
 
   @override
   void initState() {
@@ -31,13 +81,77 @@ class _ChatPageState extends State<ChatPage> {
     markMessagesAsRead();
   }
 
-  void markMessagesAsRead() {
-    FirebaseFirestore.instance
-        .collection("tbl_messages")
-        .doc(widget.conversationId)
-        .update({
-      "unreadCount": 0,
+  String formatTime(DateTime? date) {
+    if (date == null) return "";
+    var hour = date.hour;
+    var minute = date.minute.toString().padLeft(2, '0');
+    var period = hour >= 12 ? "PM" : "AM";
+    var hour12 = hour % 12;
+    if (hour12 == 0) hour12 = 12;
+    return "$hour12:$minute $period";
+  }
+
+  Future<void> pickMessageImage() async {
+    var file = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 80,
+    );
+
+    if (file == null) return;
+
+    var bytes = await file.readAsBytes();
+    setState(() {
+      selectedMessageImage = file;
+      selectedMessageImageBytes = bytes;
     });
+  }
+
+  void clearMessageImage() {
+    setState(() {
+      selectedMessageImage = null;
+      selectedMessageImageBytes = null;
+    });
+  }
+
+  Future<String?> uploadMessageImage() async {
+    if (selectedMessageImage == null || selectedMessageImageBytes == null) return null;
+
+    var fileName = selectedMessageImage!.name;
+    var storageRef = FirebaseStorage.instance
+        .ref()
+        .child("message_images")
+        .child("${currentUser!.uid}_${DateTime.now().millisecondsSinceEpoch}_$fileName");
+
+    await storageRef.putData(selectedMessageImageBytes!);
+    return storageRef.getDownloadURL();
+  }
+
+  Future<void> markMessagesAsRead() async {
+    var convoRef = FirebaseFirestore.instance
+        .collection("tbl_messages")
+        .doc(widget.conversationId);
+
+    await convoRef.update({
+      "unreadCount": 0,
+      "unreadCounts.${currentUser!.uid}": 0,
+    });
+
+    var unreadSnap = await convoRef
+        .collection("chats")
+        .where("isRead", isEqualTo: false)
+        .get();
+
+    var batch = FirebaseFirestore.instance.batch();
+    var hasUpdates = false;
+    for (var doc in unreadSnap.docs) {
+      if (doc['senderUid'] != currentUser!.uid) {
+        batch.update(doc.reference, {"isRead": true});
+        hasUpdates = true;
+      }
+    }
+    if (hasUpdates) {
+      await batch.commit();
+    }
   }
 
   void scrollToBottom() {
@@ -54,7 +168,7 @@ class _ChatPageState extends State<ChatPage> {
 
   Future<void> sendMessage() async {
     var text = messageController.text.trim();
-    if (text.isEmpty) return;
+    if (text.isEmpty && selectedMessageImageBytes == null) return;
 
     setState(() {
       isSending = true;
@@ -63,12 +177,15 @@ class _ChatPageState extends State<ChatPage> {
     messageController.clear();
 
     try {
+      var imageUrl = await uploadMessageImage();
+
       await FirebaseFirestore.instance
           .collection("tbl_messages")
           .doc(widget.conversationId)
           .collection("chats")
           .add({
         "message": text,
+        if (imageUrl != null && imageUrl.isNotEmpty) "imageUrl": imageUrl,
         "senderUid": currentUser!.uid,
         "senderName": currentUser!.displayName ?? "User",
         "isRead": false,
@@ -79,11 +196,15 @@ class _ChatPageState extends State<ChatPage> {
           .collection("tbl_messages")
           .doc(widget.conversationId)
           .update({
-        "lastMessage": text,
+        "lastMessage": text.isNotEmpty ? text : "Photo",
         "lastMessageAt": FieldValue.serverTimestamp(),
+        "lastSenderId": currentUser!.uid,
+        "unreadCounts.${widget.otherUserId}": FieldValue.increment(1),
+        "unreadCounts.${currentUser!.uid}": 0,
         "unreadCount": FieldValue.increment(1),
       });
 
+      clearMessageImage();
       scrollToBottom();
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -97,12 +218,12 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Widget buildMessage(DocumentSnapshot msg) {
+    var msgData = msg.data() as Map<String, dynamic>;
     bool isMe = msg['senderUid'] == currentUser!.uid;
     var text = msg['message'] ?? "";
+    var imageUrl = msgData['imageUrl'] ?? "";
     var date = msg['createdAt']?.toDate();
-    var timeStr = date != null
-        ? "${date.hour}:${date.minute.toString().padLeft(2, '0')}"
-        : "";
+    var timeStr = formatTime(date);
     bool isRead = msg['isRead'] ?? false;
 
     return Padding(
@@ -112,10 +233,9 @@ class _ChatPageState extends State<ChatPage> {
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           if (!isMe) ...[
-            const CircleAvatar(
-              radius: 14,
-              backgroundColor: Color(0xFF5865F2),
-              child: Icon(Icons.person, color: Colors.white, size: 14),
+            GestureDetector(
+              onTap: () => openProfile(widget.otherUserId),
+              child: buildUserAvatar(widget.otherUserId, radius: 14),
             ),
             const SizedBox(width: 6),
           ],
@@ -136,9 +256,27 @@ class _ChatPageState extends State<ChatPage> {
                     bottomRight: isMe ? const Radius.circular(4) : const Radius.circular(16),
                   ),
                 ),
-                child: Text(
-                  text,
-                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                child: Column(
+                  crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                  children: [
+                    if (imageUrl.toString().isNotEmpty)
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Image.network(
+                          imageUrl,
+                          height: 180,
+                          width: 180,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                    if (imageUrl.toString().isNotEmpty && text.toString().isNotEmpty)
+                      const SizedBox(height: 8),
+                    if (text.toString().isNotEmpty)
+                      Text(
+                        text,
+                        style: const TextStyle(color: Colors.white, fontSize: 14),
+                      ),
+                  ],
                 ),
               ),
               const SizedBox(height: 3),
@@ -173,10 +311,9 @@ class _ChatPageState extends State<ChatPage> {
         backgroundColor: const Color(0xFF2B2D31),
         title: Row(
           children: [
-            const CircleAvatar(
-              radius: 16,
-              backgroundColor: Color(0xFF5865F2),
-              child: Icon(Icons.person, color: Colors.white, size: 16),
+            GestureDetector(
+              onTap: () => openProfile(widget.otherUserId),
+              child: buildUserAvatar(widget.otherUserId, radius: 16),
             ),
             const SizedBox(width: 10),
             Column(
@@ -189,10 +326,6 @@ class _ChatPageState extends State<ChatPage> {
                     fontWeight: FontWeight.bold,
                     fontSize: 15,
                   ),
-                ),
-                Text(
-                  "Online",
-                  style: TextStyle(color: Colors.green[400], fontSize: 11),
                 ),
               ],
             ),
@@ -211,10 +344,21 @@ class _ChatPageState extends State<ChatPage> {
                   .orderBy("createdAt", descending: false)
                   .snapshots(),
               builder: (context, snapshot) {
-                if (!snapshot.hasData) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(
                     child: CircularProgressIndicator(color: Color(0xFF5865F2)),
                   );
+                }
+                if (snapshot.hasError) {
+                  return Center(
+                    child: Text(
+                      "Failed to load messages",
+                      style: TextStyle(color: Colors.grey[500]),
+                    ),
+                  );
+                }
+                if (!snapshot.hasData || snapshot.data == null) {
+                  return const SizedBox.shrink();
                 }
 
                 var messages = snapshot.data!.docs;
@@ -240,6 +384,17 @@ class _ChatPageState extends State<ChatPage> {
                   );
                 }
 
+                var hasUnread = messages.any((msg) {
+                  var isRead = msg['isRead'] ?? false;
+                  return !isRead && msg['senderUid'] != currentUser!.uid;
+                });
+
+                if (hasUnread) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    markMessagesAsRead();
+                  });
+                }
+
                 WidgetsBinding.instance.addPostFrameCallback((_) => scrollToBottom());
 
                 return ListView.builder(
@@ -257,44 +412,75 @@ class _ChatPageState extends State<ChatPage> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             color: const Color(0xFF2B2D31),
-            child: Row(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Expanded(
-                  child: TextField(
-                    controller: messageController,
-                    style: const TextStyle(color: Colors.white),
-                    onSubmitted: (_) => sendMessage(),
-                    decoration: InputDecoration(
-                      hintText: "Message ${widget.otherUserName}...",
-                      hintStyle: TextStyle(color: Colors.grey[500], fontSize: 13),
-                      filled: true,
-                      fillColor: const Color(0xFF1E1F22),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(24),
-                        borderSide: BorderSide.none,
-                      ),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-                      suffixIcon: IconButton(
-                        icon: Icon(Icons.emoji_emotions_outlined, color: Colors.grey[500]),
-                        onPressed: () {},
-                      ),
+                if (selectedMessageImageBytes != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Row(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(10),
+                          child: Image.memory(
+                            selectedMessageImageBytes!,
+                            height: 90,
+                            width: 90,
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        TextButton(
+                          onPressed: clearMessageImage,
+                          child: const Text(
+                            "Remove",
+                            style: TextStyle(color: Color(0xFF5865F2)),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                GestureDetector(
-                  onTap: isSending ? null : sendMessage,
-                  child: CircleAvatar(
-                    radius: 22,
-                    backgroundColor: const Color(0xFF5865F2),
-                    child: isSending
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                          )
-                        : const Icon(Icons.send, color: Colors.white, size: 18),
-                  ),
+                Row(
+                  children: [
+                    IconButton(
+                      onPressed: pickMessageImage,
+                      icon: Icon(Icons.photo, color: Colors.grey[500]),
+                    ),
+                    Expanded(
+                      child: TextField(
+                        controller: messageController,
+                        style: const TextStyle(color: Colors.white),
+                        onSubmitted: (_) => sendMessage(),
+                        decoration: InputDecoration(
+                          hintText: "Message ${widget.otherUserName}...",
+                          hintStyle: TextStyle(color: Colors.grey[500], fontSize: 13),
+                          filled: true,
+                          fillColor: const Color(0xFF1E1F22),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(24),
+                            borderSide: BorderSide.none,
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    GestureDetector(
+                      onTap: isSending ? null : sendMessage,
+                      child: CircleAvatar(
+                        radius: 22,
+                        backgroundColor: const Color(0xFF5865F2),
+                        child: isSending
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                    color: Colors.white, strokeWidth: 2),
+                              )
+                            : const Icon(Icons.send, color: Colors.white, size: 18),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),

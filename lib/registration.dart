@@ -12,7 +12,8 @@ class RegisterPage extends StatefulWidget {
 
 class _RegisterPageState extends State<RegisterPage> {
   var formKey = GlobalKey<FormState>();
-  var fullnameController = TextEditingController();
+  var firstNameController = TextEditingController();
+  var lastNameController = TextEditingController();
   var emailController = TextEditingController();
   var passwordController = TextEditingController();
   var confirmpassController = TextEditingController();
@@ -24,16 +25,6 @@ class _RegisterPageState extends State<RegisterPage> {
   bool obscureConfirm = true;
 
   var selectedDate = "";
-
-  List<String> favoriteGames = [
-    "League of Legends",
-    "CS:GO",
-    "Valorant",
-    "DOTA2",
-    "Mobile Legends",
-    "COC",
-  ];
-  String selectedGame = "Valorant";
 
   Future<void> pickDate() async {
     var picked = await showDatePicker(
@@ -80,19 +71,20 @@ class _RegisterPageState extends State<RegisterPage> {
         password: passwordController.text,
       );
 
-      await userCredential.user!.updateDisplayName(fullnameController.text);
+      var fullName = "${firstNameController.text.trim()} ${lastNameController.text.trim()}";
+      await userCredential.user!.updateDisplayName(fullName);
 
       await FirebaseFirestore.instance
           .collection("tbl_users")
           .doc(userCredential.user!.uid)
           .set({
-        "fullname": fullnameController.text,
+        "firstname": firstNameController.text.trim(),
+        "lastname": lastNameController.text.trim(),
         "email": emailController.text.trim(),
         "birthdate": birthdateController.text,
-        "favgame": selectedGame,
-        "bio": "New to GamerZone 🎮",
+        "bio": "",
         "followerscount": 0,
-        "followingscount": 0,
+        "followingsCount": 0,
         "postcount": 0,
         "profilepic": "",
         "createdAt": FieldValue.serverTimestamp(),
@@ -180,18 +172,52 @@ class _RegisterPageState extends State<RegisterPage> {
               ),
               const SizedBox(height: 25),
 
-              // Full Name
+              // First Name
               TextFormField(
-                controller: fullnameController,
+                controller: firstNameController,
                 style: const TextStyle(color: Colors.white),
                 validator: (value) {
                   if (value == null || value.trim().isEmpty) {
-                    return "Full name is required";
+                    return "First name is required";
+                  }
+                  if (value.trim().length > 20) {
+                    return "First name must be 20 characters or less";
                   }
                   return null;
                 },
                 decoration: InputDecoration(
-                  labelText: "Full Name",
+                  labelText: "First Name",
+                  labelStyle: TextStyle(color: Colors.grey[400]),
+                  prefixIcon: const Icon(Icons.person, color: Color(0xFF5865F2)),
+                  filled: true,
+                  fillColor: const Color(0xFF2B2D31),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: Color(0xFF5865F2)),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 15),
+
+              // Last Name
+              TextFormField(
+                controller: lastNameController,
+                style: const TextStyle(color: Colors.white),
+                validator: (value) {
+                  if (value == null || value.trim().isEmpty) {
+                    return "Last name is required";
+                  }
+                  if (value.trim().length > 20) {
+                    return "Last name must be 20 characters or less";
+                  }
+                  return null;
+                },
+                decoration: InputDecoration(
+                  labelText: "Last Name",
                   labelStyle: TextStyle(color: Colors.grey[400]),
                   prefixIcon: const Icon(Icons.person, color: Color(0xFF5865F2)),
                   filled: true,
@@ -249,8 +275,13 @@ class _RegisterPageState extends State<RegisterPage> {
                   if (value == null || value.isEmpty) {
                     return "Password is required";
                   }
-                  if (value.length < 8) {
-                    return "Password must be at least 8 characters";
+                  var missing = <String>[];
+                  if (value.length < 8) missing.add("8+ characters");
+                  if (!RegExp(r"[A-Z]").hasMatch(value)) missing.add("1 uppercase letter");
+                  if (!RegExp(r"[a-z]").hasMatch(value)) missing.add("1 lowercase letter");
+                  if (!RegExp(r"[0-9]").hasMatch(value)) missing.add("1 number");
+                  if (missing.isNotEmpty) {
+                    return "Password must include: ${missing.join(', ')}";
                   }
                   return null;
                 },
@@ -351,34 +382,6 @@ class _RegisterPageState extends State<RegisterPage> {
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                     borderSide: const BorderSide(color: Color(0xFF5865F2)),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 15),
-
-              // Favorite Game
-              Text("Favorite Game", style: TextStyle(color: Colors.grey[400], fontSize: 14)),
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 15),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF2B2D31),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<String>(
-                    value: selectedGame,
-                    dropdownColor: const Color(0xFF2B2D31),
-                    isExpanded: true,
-                    style: const TextStyle(color: Colors.white),
-                    items: favoriteGames.map((game) {
-                      return DropdownMenuItem(value: game, child: Text(game));
-                    }).toList(),
-                    onChanged: (val) {
-                      setState(() {
-                        selectedGame = val!;
-                      });
-                    },
                   ),
                 ),
               ),

@@ -13,7 +13,6 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   var currentUser = FirebaseAuth.instance.currentUser;
   bool isPrivateAccount = false;
-  bool showOnlineStatus = true;
   bool allowMessages = true;
 
 
@@ -229,13 +228,6 @@ class _SettingsPageState extends State<SettingsPage> {
             onChanged: (val) => setState(() => isPrivateAccount = val),
           ),
           buildToggleTile(
-            icon: Icons.circle,
-            title: "Show Online Status",
-            subtitle: "Let others see when you're online",
-            value: showOnlineStatus,
-            onChanged: (val) => setState(() => showOnlineStatus = val),
-          ),
-          buildToggleTile(
             icon: Icons.message,
             title: "Allow Direct Messages",
             subtitle: "Anyone can send you a message",
@@ -290,6 +282,16 @@ class _SettingsPageState extends State<SettingsPage> {
 // Blocked users page
 class BlockedUsersPage extends StatelessWidget {
   const BlockedUsersPage({super.key});
+
+  String buildDisplayName(Map<String, dynamic> userData) {
+    var first = (userData['firstname'] ?? '').toString().trim();
+    var last = (userData['lastname'] ?? '').toString().trim();
+    var combined = [first, last].where((part) => part.isNotEmpty).join(' ');
+    if (combined.isNotEmpty) return combined;
+    var legacy = (userData['fullname'] ?? '').toString().trim();
+    if (legacy.isNotEmpty) return legacy;
+    return "User";
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -347,8 +349,8 @@ class BlockedUsersPage extends StatelessWidget {
                 builder: (context, userSnapshot) {
                   if (!userSnapshot.hasData) return const SizedBox();
 
-                  var user = userSnapshot.data!;
-                  var name = user['fullname'] ?? "User";
+                  var userData = userSnapshot.data!.data() as Map<String, dynamic>? ?? {};
+                  var name = buildDisplayName(userData);
 
                   return Container(
                     margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),

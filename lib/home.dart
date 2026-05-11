@@ -34,6 +34,59 @@ class _HomePageState extends State<HomePage> {
   String searchQuery = "";
   var searchController = TextEditingController();
 
+  String formatTime(DateTime? date) {
+    if (date == null) return "";
+    var hour = date.hour;
+    var minute = date.minute.toString().padLeft(2, '0');
+    var period = hour >= 12 ? "PM" : "AM";
+    var hour12 = hour % 12;
+    if (hour12 == 0) hour12 = 12;
+    return "$hour12:$minute $period";
+  }
+
+  void openProfile(String userId) {
+    if (userId.isEmpty) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ProfilePage(userId: userId),
+      ),
+    );
+  }
+
+  Widget buildUserAvatar(String userId, {double radius = 20}) {
+    if (userId.isEmpty) {
+      return CircleAvatar(
+        radius: radius,
+        backgroundColor: const Color(0xFF5865F2),
+        child: Icon(Icons.person, color: Colors.white, size: radius),
+      );
+    }
+
+    return StreamBuilder<DocumentSnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection("tbl_users")
+          .doc(userId)
+          .snapshots(),
+      builder: (context, snapshot) {
+        var imageUrl = "";
+        if (snapshot.hasData && snapshot.data != null) {
+          var data = snapshot.data!.data() as Map<String, dynamic>?;
+          imageUrl = data?['profilepic'] ?? "";
+        }
+
+        return CircleAvatar(
+          radius: radius,
+          backgroundColor: const Color(0xFF5865F2),
+          backgroundImage: imageUrl.toString().isNotEmpty ? NetworkImage(imageUrl) : null,
+          child: imageUrl.toString().isNotEmpty
+              ? null
+              : Icon(Icons.person, color: Colors.white, size: radius),
+        );
+      },
+    );
+  }
+
   Stream<QuerySnapshot> getPostsStream() {
     if (selectedFilter == "All") {
       return FirebaseFirestore.instance
@@ -44,7 +97,6 @@ class _HomePageState extends State<HomePage> {
       return FirebaseFirestore.instance
           .collection("tbl_posts")
           .where("game", isEqualTo: selectedFilter)
-          .orderBy("createdAt", descending: true)
           .snapshots();
     }
   }
@@ -87,7 +139,57 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  void showReportMenu(String postId) {
+  Future<void> deletePost(String postId) async {
+    try {
+      await FirebaseFirestore.instance.collection("tbl_posts").doc(postId).delete();
+      await FirebaseFirestore.instance
+          .collection("tbl_users")
+          .doc(currentUser!.uid)
+          .update({"postcount": FieldValue.increment(-1)});
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Post deleted")),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString())),
+      );
+    }
+  }
+
+  void confirmDeletePost(String postId) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF2B2D31),
+          title: const Text("Delete Post", style: TextStyle(color: Colors.white)),
+          content: Text(
+            "Are you sure you want to delete this post?",
+            style: TextStyle(color: Colors.grey[400]),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text("Cancel", style: TextStyle(color: Colors.grey[400])),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(context);
+                deletePost(postId);
+              },
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+              child: const Text("Delete", style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void showPostMenu(String postId, String postOwnerId) {
+    var isOwnPost = postOwnerId == currentUser!.uid;
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF2B2D31),
@@ -107,31 +209,47 @@ class _HomePageState extends State<HomePage> {
                 borderRadius: BorderRadius.circular(10),
               ),
             ),
-            ListTile(
-              leading: const Icon(Icons.flag, color: Colors.orange),
-              title: const Text("Report Post", style: TextStyle(color: Colors.white)),
-              onTap: () {
-                Navigator.pop(context);
-                FirebaseFirestore.instance.collection("tbl_reports").add({
-                  "postId": postId,
-                  "reportedBy": currentUser!.uid,
-                  "createdAt": FieldValue.serverTimestamp(),
-                });
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("Post reported")),
-                );
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.block, color: Colors.red),
-              title: const Text("Block User", style: TextStyle(color: Colors.white)),
-              onTap: () {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("User blocked")),
-                );
-              },
-            ),
+            if (!isOwnPost)
+              ListTile(
+                leading: const Icon(Icons.flag, color: Colors.orange),
+                title: const Text("Report Post", style: TextStyle(color: Colors.white)),
+                onTap: () {
+                  Navigator.pop(context);
+                  FirebaseFirestore.instance.collection("tbl_reports").add({
+                    "postId": postId,
+                    "reportedBy": currentUser!.uid,
+                    "createdAt": FieldValue.serverTimestamp(),
+                  });
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text("Post reported")),
+                  );
+                },
+              ),
+            if (!isOwnPost)
+              ListTile(
+                leading: const Icon(Icons.block, color: Colors.red),
+                title: const Text("Block User", style: TextStyle(color: Colors.white)),
+                onTap: () {
+                  Navigator.pop(context);
+                  FirebaseFirestore.instance.collection("tbl_blocks").add({
+                    "blockerUid": currentUser!.uid,
+                    "blockedUid": postOwnerId,
+                    "createdAt": FieldValue.serverTimestamp(),
+                  });
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text("User blocked")),
+                  );
+                },
+              ),
+            if (isOwnPost)
+              ListTile(
+                leading: const Icon(Icons.delete, color: Colors.red),
+                title: const Text("Delete Post", style: TextStyle(color: Colors.white)),
+                onTap: () {
+                  Navigator.pop(context);
+                  confirmDeletePost(postId);
+                },
+              ),
             ListTile(
               leading: const Icon(Icons.close, color: Colors.grey),
               title: Text("Cancel", style: TextStyle(color: Colors.grey[400])),
@@ -217,13 +335,40 @@ class _HomePageState extends State<HomePage> {
           child: StreamBuilder<QuerySnapshot>(
             stream: getPostsStream(),
             builder: (context, snapshot) {
-              if (!snapshot.hasData) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(
                   child: CircularProgressIndicator(color: Color(0xFF5865F2)),
                 );
               }
 
+              if (snapshot.hasError) {
+                return Center(
+                  child: Text(
+                    "Failed to load posts",
+                    style: TextStyle(color: Colors.grey[500]),
+                  ),
+                );
+              }
+
+              if (!snapshot.hasData || snapshot.data == null) {
+                return Center(
+                  child: Text(
+                    "No posts yet",
+                    style: TextStyle(color: Colors.grey[500]),
+                  ),
+                );
+              }
+
               var posts = snapshot.data!.docs;
+
+              posts.sort((a, b) {
+                var aDate = a['createdAt']?.toDate();
+                var bDate = b['createdAt']?.toDate();
+                if (aDate == null && bDate == null) return 0;
+                if (aDate == null) return 1;
+                if (bDate == null) return -1;
+                return bDate.compareTo(aDate);
+              });
 
               if (posts.isEmpty) {
                 return Center(
@@ -238,8 +383,20 @@ class _HomePageState extends State<HomePage> {
               var filteredPosts = posts.where((post) {
                 var content = (post['content'] ?? '').toString().toLowerCase();
                 var username = (post['username'] ?? '').toString().toLowerCase();
-                return content.contains(searchQuery) || username.contains(searchQuery);
+                var game = (post['game'] ?? '').toString().toLowerCase();
+                return content.contains(searchQuery) ||
+                    username.contains(searchQuery) ||
+                    game.contains(searchQuery);
               }).toList();
+
+              if (filteredPosts.isEmpty) {
+                return Center(
+                  child: Text(
+                    "No posts found",
+                    style: TextStyle(color: Colors.grey[500]),
+                  ),
+                );
+              }
 
               return ListView.builder(
                 padding: const EdgeInsets.all(12),
@@ -247,22 +404,26 @@ class _HomePageState extends State<HomePage> {
                 itemBuilder: (context, index) {
                   var post = filteredPosts[index];
                   var postId = post.id;
+                  var postData = post.data() as Map<String, dynamic>;
 
                   List likedBy = post['likedBy'] ?? [];
                   List bookmarkedBy = post['bookmarkedBy'] ?? [];
                   bool isLiked = likedBy.contains(currentUser!.uid);
                   bool isBookmarked = bookmarkedBy.contains(currentUser!.uid);
 
-                  var date = post['createdAt']?.toDate().toString() ?? '';
+                  var date = formatTime(post['createdAt']?.toDate());
+                  var imageUrl = postData['imageUrl'] ?? "";
 
                   return GestureDetector(
-                    onTap: () {
-                      Navigator.push(
+                    onTap: () async {
+                      await Navigator.push(
                         context,
                         MaterialPageRoute(
                           builder: (context) => PostDetailPage(postId: postId),
                         ),
                       );
+                      if (!mounted) return;
+                      setState(() {});
                     },
                     child: Container(
                       margin: const EdgeInsets.only(bottom: 12),
@@ -277,10 +438,9 @@ class _HomePageState extends State<HomePage> {
                           // Header
                           Row(
                             children: [
-                              CircleAvatar(
-                                radius: 20,
-                                backgroundColor: const Color(0xFF5865F2),
-                                child: const Icon(Icons.person, color: Colors.white),
+                              GestureDetector(
+                                onTap: () => openProfile(postData['uid'] ?? ""),
+                                child: buildUserAvatar(postData['uid'] ?? "", radius: 20),
                               ),
                               const SizedBox(width: 10),
                               Expanded(
@@ -319,7 +479,7 @@ class _HomePageState extends State<HomePage> {
                                 ),
                               ),
                               IconButton(
-                                onPressed: () => showReportMenu(postId),
+                                onPressed: () => showPostMenu(postId, postData['uid'] ?? ""),
                                 icon: Icon(Icons.more_vert, color: Colors.grey[500], size: 20),
                               ),
                             ],
@@ -331,6 +491,18 @@ class _HomePageState extends State<HomePage> {
                             post['content'] ?? "",
                             style: const TextStyle(color: Colors.white, fontSize: 15),
                           ),
+                          if (imageUrl.toString().isNotEmpty) ...[
+                            const SizedBox(height: 12),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: Image.network(
+                                imageUrl,
+                                height: 200,
+                                width: double.infinity,
+                                fit: BoxFit.cover,
+                              ),
+                            ),
+                          ],
                           const SizedBox(height: 14),
 
                           // Actions
@@ -409,6 +581,7 @@ class _HomePageState extends State<HomePage> {
                   letterSpacing: 1.2,
                 ),
               ),
+              automaticallyImplyLeading: false,
               centerTitle: false,
               actions: [
                 IconButton(
