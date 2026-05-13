@@ -23,14 +23,13 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
 
   bool isFollowing = false;
   bool isLoadingFollow = false;
-  bool isBlocked = false;
+  bool isBlockedByMe = false;
+  bool isBlockedByOther = false;
   bool isLoadingBlock = false;
 
   XFile? selectedProfileImage;
   Uint8List? selectedProfileImageBytes;
   bool isUploadingPhoto = false;
-
-  List<String> autoTags = [];
 
   String formatTime(DateTime? date) {
     if (date == null) return "";
@@ -69,7 +68,7 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
     super.initState();
     tabController = TabController(length: 2, vsync: this);
     checkIfFollowing();
-    checkIfBlocked();
+    checkBlockStatus();
   }
 
   Future<void> checkIfFollowing() async {
@@ -85,16 +84,27 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
     });
   }
 
-  Future<void> checkIfBlocked() async {
+  Future<void> checkBlockStatus() async {
     if (widget.userId == currentUser!.uid) return;
 
-    var doc = await FirebaseFirestore.instance
+    var myId = currentUser!.uid;
+    var blockedByMeSnap = await FirebaseFirestore.instance
         .collection("tbl_blocks")
-        .doc("${currentUser!.uid}_${widget.userId}")
+        .where("blockerUid", isEqualTo: myId)
+        .where("blockedUid", isEqualTo: widget.userId)
+        .limit(1)
+        .get();
+
+    var blockedByOtherSnap = await FirebaseFirestore.instance
+        .collection("tbl_blocks")
+        .where("blockerUid", isEqualTo: widget.userId)
+        .where("blockedUid", isEqualTo: myId)
+        .limit(1)
         .get();
 
     setState(() {
-      isBlocked = doc.exists;
+      isBlockedByMe = blockedByMeSnap.docs.isNotEmpty;
+      isBlockedByOther = blockedByOtherSnap.docs.isNotEmpty;
     });
   }
 
@@ -170,24 +180,32 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
       isLoadingBlock = true;
     });
 
-    var blockDocId = "${currentUser!.uid}_${widget.userId}";
-    var blockRef = FirebaseFirestore.instance.collection("tbl_blocks").doc(blockDocId);
-
     try {
-      if (isBlocked) {
-        await blockRef.delete();
+      if (isBlockedByMe) {
+        var existing = await FirebaseFirestore.instance
+            .collection("tbl_blocks")
+            .where("blockerUid", isEqualTo: currentUser!.uid)
+            .where("blockedUid", isEqualTo: widget.userId)
+            .get();
+        for (var doc in existing.docs) {
+          await doc.reference.delete();
+        }
         setState(() {
-          isBlocked = false;
+          isBlockedByMe = false;
         });
       } else {
-        await blockRef.set({
+        var blockDocId = "${currentUser!.uid}_${widget.userId}";
+        await FirebaseFirestore.instance
+            .collection("tbl_blocks")
+            .doc(blockDocId)
+            .set({
           "blockerUid": currentUser!.uid,
           "blockedUid": widget.userId,
           "createdAt": FieldValue.serverTimestamp(),
         });
         await unfollowForBlock();
         setState(() {
-          isBlocked = true;
+          isBlockedByMe = true;
         });
       }
     } catch (e) {
@@ -206,7 +224,7 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
   void confirmBlockChange() {
     if (widget.userId == currentUser!.uid) return;
 
-    var isUnblock = isBlocked;
+    var isUnblock = isBlockedByMe;
     showDialog(
       context: context,
       builder: (context) {
@@ -367,6 +385,13 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
   Future<void> startChatWithUser(String otherUid, String otherName) async {
     if (otherUid == currentUser!.uid) return;
 
+    if (isBlockedByMe) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("You blocked this user")),
+      );
+      return;
+    }
+
     List<String> ids = [currentUser!.uid, otherUid];
     ids.sort();
     var conversationId = ids.join("_");
@@ -398,6 +423,18 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
           conversationId: conversationId,
           otherUserName: otherName,
           otherUserId: otherUid,
+        ),
+      ),
+    );
+  }
+
+  void openFollowList({required bool showFollowers}) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => FollowersFollowingPage(
+          userId: widget.userId,
+          showFollowers: showFollowers,
         ),
       ),
     );
@@ -456,6 +493,7 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
 
         bool isOwnProfile = widget.userId == currentUser!.uid;
         var showBio = bio.trim().isNotEmpty && bio.trim() != "New to GamerZone 🎮";
+        var isInteractionBlocked = isBlockedByMe || isBlockedByOther;
 
         return Scaffold(
           backgroundColor: const Color(0xFF1E1F22),
@@ -477,7 +515,6 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // Avatar + stats row
                         Row(
                           children: [
                             Stack(
@@ -526,8 +563,16 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
                                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                                 children: [
                                   buildStatColumn(postCount.toString(), "Posts"),
-                                  buildStatColumn(followers.toString(), "Followers"),
-                                  buildStatColumn(followings.toString(), "Following"),
+                                  buildStatColumn(
+                                    followers.toString(),
+                                    "Followers",
+                                    onTap: () => openFollowList(showFollowers: true),
+                                  ),
+                                  buildStatColumn(
+                                    followings.toString(),
+                                    "Following",
+                                    onTap: () => openFollowList(showFollowers: false),
+                                  ),
                                 ],
                               ),
                             ),
@@ -560,7 +605,6 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
                         ] else
                           const SizedBox(height: 8),
 
-                        // Auto-generated tags
                         Wrap(
                           spacing: 6,
                           runSpacing: 6,
@@ -636,7 +680,6 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
                           ),
                         const SizedBox(height: 14),
 
-                        // Follow / Message buttons
                         if (!isOwnProfile)
                           Row(
                             children: [
@@ -644,7 +687,9 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
                                 child: SizedBox(
                                   height: 38,
                                   child: ElevatedButton(
-                                    onPressed: isLoadingFollow ? null : () => toggleFollow(),
+                                    onPressed: isLoadingFollow || isInteractionBlocked
+                                        ? null
+                                        : () => toggleFollow(),
                                     style: ElevatedButton.styleFrom(
                                       backgroundColor: isFollowing
                                           ? const Color(0xFF2B2D31)
@@ -677,7 +722,9 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
                               SizedBox(
                                 height: 38,
                                 child: ElevatedButton(
-                                  onPressed: () => startChatWithUser(widget.userId, fullname),
+                                  onPressed: isBlockedByMe
+                                      ? null
+                                      : () => startChatWithUser(widget.userId, fullname),
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: const Color(0xFF2B2D31),
                                     side: BorderSide(color: Colors.grey.shade600),
@@ -696,6 +743,38 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
                                       ),
                                     ],
                                   ),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              SizedBox(
+                                height: 38,
+                                child: ElevatedButton(
+                                  onPressed: isLoadingBlock ? null : confirmBlockChange,
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: isBlockedByMe
+                                        ? const Color(0xFF2B2D31)
+                                        : Colors.red.shade600,
+                                    side: isBlockedByMe
+                                        ? BorderSide(color: Colors.grey.shade600)
+                                        : BorderSide.none,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                  ),
+                                  child: isLoadingBlock
+                                      ? const SizedBox(
+                                          width: 16,
+                                          height: 16,
+                                          child: CircularProgressIndicator(
+                                              color: Colors.white, strokeWidth: 2),
+                                        )
+                                      : Text(
+                                          isBlockedByMe ? "Blocked" : "Block",
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
                                 ),
                               ),
                             ],
@@ -724,7 +803,6 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
             body: TabBarView(
               controller: tabController,
               children: [
-                // Posts tab
                 StreamBuilder<QuerySnapshot>(
                   stream: FirebaseFirestore.instance
                       .collection("tbl_posts")
@@ -858,7 +936,6 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
                   },
                 ),
 
-                // Saved posts tab
                 StreamBuilder<QuerySnapshot>(
                   stream: FirebaseFirestore.instance
                       .collection("tbl_posts")
@@ -980,8 +1057,8 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
     );
   }
 
-  Widget buildStatColumn(String count, String label) {
-    return Column(
+  Widget buildStatColumn(String count, String label, {VoidCallback? onTap}) {
+    var content = Column(
       children: [
         Text(
           count,
@@ -997,6 +1074,151 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
           style: TextStyle(color: Colors.grey[400], fontSize: 12),
         ),
       ],
+    );
+
+    if (onTap == null) return content;
+
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: content,
+    );
+  }
+}
+
+class FollowersFollowingPage extends StatelessWidget {
+  final String userId;
+  final bool showFollowers;
+
+  const FollowersFollowingPage({
+    super.key,
+    required this.userId,
+    required this.showFollowers,
+  });
+
+  String buildDisplayName(Map<String, dynamic> userData) {
+    var first = (userData['firstname'] ?? '').toString().trim();
+    var last = (userData['lastname'] ?? '').toString().trim();
+    var combined = [first, last].where((part) => part.isNotEmpty).join(' ');
+    if (combined.isNotEmpty) return combined;
+    var legacy = (userData['fullname'] ?? '').toString().trim();
+    if (legacy.isNotEmpty) return legacy;
+    return "User";
+  }
+
+  void openProfile(BuildContext context, String userId) {
+    if (userId.isEmpty) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ProfilePage(userId: userId),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    var title = showFollowers ? "Followers" : "Following";
+    var query = FirebaseFirestore.instance
+        .collection("tbl_follows")
+        .where(showFollowers ? "followingUid" : "followerUid", isEqualTo: userId);
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF1E1F22),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF2B2D31),
+        title: Text(
+          title,
+          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
+        centerTitle: true,
+        iconTheme: const IconThemeData(color: Colors.white),
+      ),
+      body: StreamBuilder<QuerySnapshot>(
+        stream: query.snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(
+              child: CircularProgressIndicator(color: Color(0xFF5865F2)),
+            );
+          }
+          if (snapshot.hasError) {
+            return Center(
+              child: Text(
+                "Failed to load $title",
+                style: TextStyle(color: Colors.grey[500]),
+              ),
+            );
+          }
+          if (!snapshot.hasData || snapshot.data == null) {
+            return const SizedBox.shrink();
+          }
+
+          var follows = snapshot.data!.docs;
+          if (follows.isEmpty) {
+            return Center(
+              child: Text(
+                "No $title yet",
+                style: TextStyle(color: Colors.grey[500]),
+              ),
+            );
+          }
+
+          return ListView.builder(
+            itemCount: follows.length,
+            itemBuilder: (context, index) {
+              var follow = follows[index];
+              var otherUid = showFollowers ? follow['followerUid'] : follow['followingUid'];
+              if (otherUid == null || otherUid.toString().isEmpty) {
+                return const SizedBox.shrink();
+              }
+
+              return FutureBuilder<DocumentSnapshot>(
+                future: FirebaseFirestore.instance
+                    .collection("tbl_users")
+                    .doc(otherUid)
+                    .get(),
+                builder: (context, userSnapshot) {
+                  if (!userSnapshot.hasData) {
+                    return const SizedBox(
+                      height: 70,
+                      child: Center(
+                        child: CircularProgressIndicator(
+                          color: Color(0xFF5865F2),
+                          strokeWidth: 2,
+                        ),
+                      ),
+                    );
+                  }
+
+                  var userData = userSnapshot.data!.data() as Map<String, dynamic>? ?? {};
+                  var name = buildDisplayName(userData);
+                  var profilePic = userData['profilepic'] ?? "";
+
+                  return ListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                    leading: CircleAvatar(
+                      radius: 24,
+                      backgroundColor: const Color(0xFF5865F2),
+                      backgroundImage: profilePic.toString().isNotEmpty
+                          ? NetworkImage(profilePic)
+                          : null,
+                      child: profilePic.toString().isNotEmpty
+                          ? null
+                          : const Icon(Icons.person, color: Colors.white),
+                    ),
+                    title: Text(
+                      name,
+                      style: const TextStyle(color: Colors.white),
+                    ),
+                    onTap: () => openProfile(context, otherUid.toString()),
+                  );
+                },
+              );
+            },
+          );
+        },
+      ),
     );
   }
 }

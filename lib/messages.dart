@@ -14,7 +14,6 @@ class MessagesPage extends StatefulWidget {
 class _MessagesPageState extends State<MessagesPage> {
   var currentUser = FirebaseAuth.instance.currentUser;
   var searchController = TextEditingController();
-  String searchQuery = "";
 
   void openProfile(String userId) {
     if (userId.isEmpty) return;

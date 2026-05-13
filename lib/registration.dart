@@ -24,8 +24,6 @@ class _RegisterPageState extends State<RegisterPage> {
   bool obscurePass = true;
   bool obscureConfirm = true;
 
-  var selectedDate = "";
-
   Future<void> pickDate() async {
     var picked = await showDatePicker(
       context: context,
@@ -44,9 +42,7 @@ class _RegisterPageState extends State<RegisterPage> {
 
     if (picked != null) {
       setState(() {
-        selectedDate =
-            "${picked.month}/${picked.day}/${picked.year}";
-        birthdateController.text = selectedDate;
+        birthdateController.text = "${picked.month}/${picked.day}/${picked.year}";
       });
     }
   }
@@ -172,7 +168,6 @@ class _RegisterPageState extends State<RegisterPage> {
               ),
               const SizedBox(height: 25),
 
-              // First Name
               TextFormField(
                 controller: firstNameController,
                 style: const TextStyle(color: Colors.white),
@@ -203,7 +198,6 @@ class _RegisterPageState extends State<RegisterPage> {
               ),
               const SizedBox(height: 15),
 
-              // Last Name
               TextFormField(
                 controller: lastNameController,
                 style: const TextStyle(color: Colors.white),
@@ -234,7 +228,6 @@ class _RegisterPageState extends State<RegisterPage> {
               ),
               const SizedBox(height: 15),
 
-              // Email
               TextFormField(
                 controller: emailController,
                 keyboardType: TextInputType.emailAddress,
@@ -266,7 +259,6 @@ class _RegisterPageState extends State<RegisterPage> {
               ),
               const SizedBox(height: 15),
 
-              // Password
               TextFormField(
                 controller: passwordController,
                 obscureText: obscurePass,
@@ -314,7 +306,6 @@ class _RegisterPageState extends State<RegisterPage> {
               ),
               const SizedBox(height: 15),
 
-              // Confirm Password
               TextFormField(
                 controller: confirmpassController,
                 obscureText: obscureConfirm,
@@ -357,7 +348,6 @@ class _RegisterPageState extends State<RegisterPage> {
               ),
               const SizedBox(height: 15),
 
-              // Birthdate
               TextFormField(
                 controller: birthdateController,
                 readOnly: true,
@@ -387,7 +377,6 @@ class _RegisterPageState extends State<RegisterPage> {
               ),
               const SizedBox(height: 15),
 
-              // Privacy policy
               Row(
                 children: [
                   Checkbox(

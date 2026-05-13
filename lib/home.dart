@@ -231,7 +231,11 @@ class _HomePageState extends State<HomePage> {
                 title: const Text("Block User", style: TextStyle(color: Colors.white)),
                 onTap: () {
                   Navigator.pop(context);
-                  FirebaseFirestore.instance.collection("tbl_blocks").add({
+                  var blockDocId = "${currentUser!.uid}_${postOwnerId}";
+                  FirebaseFirestore.instance
+                      .collection("tbl_blocks")
+                      .doc(blockDocId)
+                      .set({
                     "blockerUid": currentUser!.uid,
                     "blockedUid": postOwnerId,
                     "createdAt": FieldValue.serverTimestamp(),
@@ -265,7 +269,6 @@ class _HomePageState extends State<HomePage> {
   Widget buildFeedTab() {
     return Column(
       children: [
-        // Search bar
         Container(
           color: const Color(0xFF2B2D31),
           padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 10),
@@ -292,7 +295,6 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
 
-        // Game filter chips
         Container(
           color: const Color(0xFF2B2D31),
           height: 50,
@@ -330,7 +332,6 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
 
-        // Posts list
         Expanded(
           child: StreamBuilder<QuerySnapshot>(
             stream: getPostsStream(),
@@ -379,7 +380,6 @@ class _HomePageState extends State<HomePage> {
                 );
               }
 
-              // filter by search
               var filteredPosts = posts.where((post) {
                 var content = (post['content'] ?? '').toString().toLowerCase();
                 var username = (post['username'] ?? '').toString().toLowerCase();
@@ -435,7 +435,6 @@ class _HomePageState extends State<HomePage> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Header
                           Row(
                             children: [
                               GestureDetector(
@@ -462,7 +461,6 @@ class _HomePageState extends State<HomePage> {
                                   ],
                                 ),
                               ),
-                              // Game tag
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                 decoration: BoxDecoration(
@@ -486,7 +484,6 @@ class _HomePageState extends State<HomePage> {
                           ),
                           const SizedBox(height: 12),
 
-                          // Content
                           Text(
                             post['content'] ?? "",
                             style: const TextStyle(color: Colors.white, fontSize: 15),
@@ -505,7 +502,6 @@ class _HomePageState extends State<HomePage> {
                           ],
                           const SizedBox(height: 14),
 
-                          // Actions
                           Row(
                             children: [
                               GestureDetector(
@@ -566,6 +562,7 @@ class _HomePageState extends State<HomePage> {
       buildFeedTab(),
       MessagesPage(),
       ProfilePage(userId: currentUser!.uid),
+      const SettingsPage(),
     ];
 
     return Scaffold(
@@ -583,17 +580,6 @@ class _HomePageState extends State<HomePage> {
               ),
               automaticallyImplyLeading: false,
               centerTitle: false,
-              actions: [
-                IconButton(
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (context) => const SettingsPage()),
-                    );
-                  },
-                  icon: const Icon(Icons.settings, color: Colors.white),
-                ),
-              ],
             )
           : null,
       body: pages[currentIndex],
@@ -626,6 +612,7 @@ class _HomePageState extends State<HomePage> {
           BottomNavigationBarItem(icon: Icon(Icons.home), label: "Home"),
           BottomNavigationBarItem(icon: Icon(Icons.message), label: "Messages"),
           BottomNavigationBarItem(icon: Icon(Icons.person), label: "Profile"),
+          BottomNavigationBarItem(icon: Icon(Icons.settings), label: "Settings"),
         ],
       ),
     );

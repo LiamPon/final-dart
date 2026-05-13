@@ -137,7 +137,6 @@ class _PostDetailPageState extends State<PostDetailPage> {
         "createdAt": FieldValue.serverTimestamp(),
       });
 
-      // update comment count on post
       await FirebaseFirestore.instance
           .collection("tbl_posts")
           .doc(widget.postId)
@@ -198,7 +197,6 @@ class _PostDetailPageState extends State<PostDetailPage> {
             child: ListView(
               padding: const EdgeInsets.all(12),
               children: [
-                // Main post
                 StreamBuilder<DocumentSnapshot>(
                   stream: FirebaseFirestore.instance
                       .collection("tbl_posts")
@@ -333,7 +331,6 @@ class _PostDetailPageState extends State<PostDetailPage> {
                 ),
                 const SizedBox(height: 10),
 
-                // Comments
                 StreamBuilder<QuerySnapshot>(
                   stream: FirebaseFirestore.instance
                       .collection("tbl_posts")
@@ -464,7 +461,6 @@ class _PostDetailPageState extends State<PostDetailPage> {
             ),
           ),
 
-          // Comment input
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             color: const Color(0xFF2B2D31),

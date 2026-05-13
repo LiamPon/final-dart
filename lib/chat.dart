@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -29,6 +30,10 @@ class _ChatPageState extends State<ChatPage> {
   var scrollController = ScrollController();
 
   bool isSending = false;
+  bool isBlockedByMe = false;
+  bool isBlockedByOther = false;
+  StreamSubscription<QuerySnapshot>? blockByMeSub;
+  StreamSubscription<QuerySnapshot>? blockByOtherSub;
   XFile? selectedMessageImage;
   Uint8List? selectedMessageImageBytes;
 
@@ -79,6 +84,70 @@ class _ChatPageState extends State<ChatPage> {
   void initState() {
     super.initState();
     markMessagesAsRead();
+    listenForBlockStatus();
+  }
+
+  @override
+  void dispose() {
+    blockByMeSub?.cancel();
+    blockByOtherSub?.cancel();
+    messageController.dispose();
+    scrollController.dispose();
+    super.dispose();
+  }
+
+  void listenForBlockStatus() {
+    var myId = currentUser?.uid;
+    if (myId == null) return;
+
+    blockByMeSub = FirebaseFirestore.instance
+        .collection("tbl_blocks")
+        .where("blockerUid", isEqualTo: myId)
+        .where("blockedUid", isEqualTo: widget.otherUserId)
+        .snapshots()
+        .listen((snapshot) {
+      if (!mounted) return;
+      setState(() {
+        isBlockedByMe = snapshot.docs.isNotEmpty;
+      });
+    });
+
+    blockByOtherSub = FirebaseFirestore.instance
+        .collection("tbl_blocks")
+        .where("blockerUid", isEqualTo: widget.otherUserId)
+        .where("blockedUid", isEqualTo: myId)
+        .snapshots()
+        .listen((snapshot) {
+      if (!mounted) return;
+      setState(() {
+        isBlockedByOther = snapshot.docs.isNotEmpty;
+      });
+    });
+  }
+
+  Future<void> unblockUser() async {
+    var myId = currentUser?.uid;
+    if (myId == null) return;
+
+    try {
+      var snapshot = await FirebaseFirestore.instance
+          .collection("tbl_blocks")
+          .where("blockerUid", isEqualTo: myId)
+          .where("blockedUid", isEqualTo: widget.otherUserId)
+          .get();
+      for (var doc in snapshot.docs) {
+        await doc.reference.delete();
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("User unblocked")),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString())),
+      );
+    }
   }
 
   String formatTime(DateTime? date) {
@@ -167,6 +236,7 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> sendMessage() async {
+    if (isBlockedByMe || isBlockedByOther) return;
     var text = messageController.text.trim();
     if (text.isEmpty && selectedMessageImageBytes == null) return;
 
@@ -305,6 +375,7 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   Widget build(BuildContext context) {
+    var isBlocked = isBlockedByMe || isBlockedByOther;
     return Scaffold(
       backgroundColor: const Color(0xFF1E1F22),
       appBar: AppBar(
@@ -409,82 +480,110 @@ class _ChatPageState extends State<ChatPage> {
             ),
           ),
 
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            color: const Color(0xFF2B2D31),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (selectedMessageImageBytes != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Row(
-                      children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(10),
-                          child: Image.memory(
-                            selectedMessageImageBytes!,
-                            height: 90,
-                            width: 90,
-                            fit: BoxFit.cover,
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        TextButton(
-                          onPressed: clearMessageImage,
-                          child: const Text(
-                            "Remove",
-                            style: TextStyle(color: Color(0xFF5865F2)),
-                          ),
-                        ),
-                      ],
+          if (isBlocked)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+              color: const Color(0xFF2B2D31),
+              child: Row(
+                children: [
+                  Icon(Icons.block, color: Colors.red[300], size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      isBlockedByMe
+                          ? "You blocked this user. Unblock to send messages."
+                          : "You cannot message this user because you were blocked.",
+                      style: TextStyle(color: Colors.grey[300], fontSize: 13),
                     ),
                   ),
-                Row(
-                  children: [
-                    IconButton(
-                      onPressed: pickMessageImage,
-                      icon: Icon(Icons.photo, color: Colors.grey[500]),
+                  if (isBlockedByMe)
+                    TextButton(
+                      onPressed: unblockUser,
+                      child: const Text(
+                        "Unblock",
+                        style: TextStyle(color: Color(0xFF5865F2)),
+                      ),
                     ),
-                    Expanded(
-                      child: TextField(
-                        controller: messageController,
-                        style: const TextStyle(color: Colors.white),
-                        onSubmitted: (_) => sendMessage(),
-                        decoration: InputDecoration(
-                          hintText: "Message ${widget.otherUserName}...",
-                          hintStyle: TextStyle(color: Colors.grey[500], fontSize: 13),
-                          filled: true,
-                          fillColor: const Color(0xFF1E1F22),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(24),
-                            borderSide: BorderSide.none,
+                ],
+              ),
+            )
+          else
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              color: const Color(0xFF2B2D31),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (selectedMessageImageBytes != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Row(
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(10),
+                            child: Image.memory(
+                              selectedMessageImageBytes!,
+                              height: 90,
+                              width: 90,
+                              fit: BoxFit.cover,
+                            ),
                           ),
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                          const SizedBox(width: 10),
+                          TextButton(
+                            onPressed: clearMessageImage,
+                            child: const Text(
+                              "Remove",
+                              style: TextStyle(color: Color(0xFF5865F2)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  Row(
+                    children: [
+                      IconButton(
+                        onPressed: pickMessageImage,
+                        icon: Icon(Icons.photo, color: Colors.grey[500]),
+                      ),
+                      Expanded(
+                        child: TextField(
+                          controller: messageController,
+                          style: const TextStyle(color: Colors.white),
+                          onSubmitted: (_) => sendMessage(),
+                          decoration: InputDecoration(
+                            hintText: "Message ${widget.otherUserName}...",
+                            hintStyle: TextStyle(color: Colors.grey[500], fontSize: 13),
+                            filled: true,
+                            fillColor: const Color(0xFF1E1F22),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(24),
+                              borderSide: BorderSide.none,
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    GestureDetector(
-                      onTap: isSending ? null : sendMessage,
-                      child: CircleAvatar(
-                        radius: 22,
-                        backgroundColor: const Color(0xFF5865F2),
-                        child: isSending
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                    color: Colors.white, strokeWidth: 2),
-                              )
-                            : const Icon(Icons.send, color: Colors.white, size: 18),
+                      const SizedBox(width: 8),
+                      GestureDetector(
+                        onTap: isSending ? null : sendMessage,
+                        child: CircleAvatar(
+                          radius: 22,
+                          backgroundColor: const Color(0xFF5865F2),
+                          child: isSending
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                      color: Colors.white, strokeWidth: 2),
+                                )
+                              : const Icon(Icons.send, color: Colors.white, size: 18),
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-              ],
+                    ],
+                  ),
+                ],
+              ),
             ),
-          ),
         ],
       ),
     );

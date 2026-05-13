@@ -12,9 +12,6 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   var currentUser = FirebaseAuth.instance.currentUser;
-  bool isPrivateAccount = false;
-  bool allowMessages = true;
-
 
   Future<void> logout() async {
     await FirebaseAuth.instance.signOut();
@@ -76,13 +73,11 @@ class _SettingsPageState extends State<SettingsPage> {
               onPressed: () async {
                 Navigator.pop(context);
                 try {
-                  // Delete Firestore user data
                   await FirebaseFirestore.instance
                       .collection("tbl_users")
                       .doc(currentUser!.uid)
                       .delete();
 
-                  // Delete the auth account
                   await currentUser!.delete();
 
                   if (!mounted) return;
@@ -121,29 +116,6 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  Widget buildToggleTile({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required bool value,
-    required Function(bool) onChanged,
-  }) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      decoration: BoxDecoration(
-        color: const Color(0xFF2B2D31),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: SwitchListTile(
-        secondary: Icon(icon, color: const Color(0xFF5865F2)),
-        title: Text(title, style: const TextStyle(color: Colors.white, fontSize: 14)),
-        subtitle: Text(subtitle, style: TextStyle(color: Colors.grey[500], fontSize: 12)),
-        value: value,
-        activeColor: const Color(0xFF5865F2),
-        onChanged: onChanged,
-      ),
-    );
-  }
 
   Widget buildActionTile({
     required IconData icon,
@@ -182,7 +154,6 @@ class _SettingsPageState extends State<SettingsPage> {
       ),
       body: ListView(
         children: [
-          // Account info
           Container(
             margin: const EdgeInsets.all(12),
             padding: const EdgeInsets.all(16),
@@ -217,22 +188,6 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
               ],
             ),
-          ),
-
-          buildSectionTitle("Privacy"),
-          buildToggleTile(
-            icon: Icons.lock,
-            title: "Private Account",
-            subtitle: "Only followers can see your posts",
-            value: isPrivateAccount,
-            onChanged: (val) => setState(() => isPrivateAccount = val),
-          ),
-          buildToggleTile(
-            icon: Icons.message,
-            title: "Allow Direct Messages",
-            subtitle: "Anyone can send you a message",
-            value: allowMessages,
-            onChanged: (val) => setState(() => allowMessages = val),
           ),
 
           buildSectionTitle("Manage"),
@@ -279,7 +234,6 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 }
 
-// Blocked users page
 class BlockedUsersPage extends StatelessWidget {
   const BlockedUsersPage({super.key});
 

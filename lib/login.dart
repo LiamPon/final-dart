@@ -133,7 +133,6 @@ class _LoginPageState extends State<LoginPage> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // Logo area
               Container(
                 width: 80,
                 height: 80,
@@ -160,7 +159,6 @@ class _LoginPageState extends State<LoginPage> {
               ),
               const SizedBox(height: 35),
 
-              // Login card
               Container(
                 padding: const EdgeInsets.all(25),
                 decoration: BoxDecoration(
@@ -185,7 +183,6 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                     const SizedBox(height: 25),
 
-                    // Email
                     TextField(
                       controller: emailController,
                       keyboardType: TextInputType.emailAddress,
@@ -208,7 +205,6 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                     const SizedBox(height: 15),
 
-                    // Password
                     TextField(
                       controller: passwordController,
                       obscureText: obscurePass,
@@ -242,7 +238,6 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                     const SizedBox(height: 8),
 
-                    // Forgot password
                     Align(
                       alignment: Alignment.centerRight,
                       child: TextButton(

@@ -34,6 +34,43 @@ class _CreatePostPageState extends State<CreatePostPage> {
     "COC",
   ];
 
+  Widget buildCurrentUserAvatar() {
+    var uid = currentUser?.uid;
+    if (uid == null) {
+      return const CircleAvatar(
+        radius: 22,
+        backgroundColor: Color(0xFF5865F2),
+        child: Icon(Icons.person, color: Colors.white),
+      );
+    }
+
+    return StreamBuilder<DocumentSnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection("tbl_users")
+          .doc(uid)
+          .snapshots(),
+      builder: (context, snapshot) {
+        var imageUrl = currentUser?.photoURL ?? "";
+        if (snapshot.hasData && snapshot.data != null) {
+          var data = snapshot.data!.data() as Map<String, dynamic>?;
+          var profilePic = data?['profilepic'] ?? "";
+          if (profilePic.toString().isNotEmpty) {
+            imageUrl = profilePic.toString();
+          }
+        }
+
+        return CircleAvatar(
+          radius: 22,
+          backgroundColor: const Color(0xFF5865F2),
+          backgroundImage: imageUrl.isNotEmpty ? NetworkImage(imageUrl) : null,
+          child: imageUrl.isNotEmpty
+              ? null
+              : const Icon(Icons.person, color: Colors.white),
+        );
+      },
+    );
+  }
+
   Future<void> pickPostImage() async {
     var file = await ImagePicker().pickImage(
       source: ImageSource.gallery,
@@ -172,14 +209,9 @@ class _CreatePostPageState extends State<CreatePostPage> {
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                // User row
                 Row(
                   children: [
-                    const CircleAvatar(
-                      radius: 22,
-                      backgroundColor: Color(0xFF5865F2),
-                      child: Icon(Icons.person, color: Colors.white),
-                    ),
+                    buildCurrentUserAvatar(),
                     const SizedBox(width: 12),
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -202,7 +234,6 @@ class _CreatePostPageState extends State<CreatePostPage> {
                 ),
                 const SizedBox(height: 20),
 
-                // Text field
                 TextField(
                   controller: postController,
                   maxLines: null,
@@ -227,7 +258,6 @@ class _CreatePostPageState extends State<CreatePostPage> {
                 ),
                 const SizedBox(height: 8),
 
-                // Character counter
                 Align(
                   alignment: Alignment.centerRight,
                   child: Text(
@@ -276,7 +306,6 @@ class _CreatePostPageState extends State<CreatePostPage> {
                   ),
                 const SizedBox(height: 20),
 
-                // Game tag selector
                 Text(
                   "Select Game Tag",
                   style: TextStyle(color: Colors.grey[400], fontSize: 14, fontWeight: FontWeight.w600),
